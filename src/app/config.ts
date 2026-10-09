@@ -1,0 +1,36 @@
+export const APP_CONFIG = {
+  profileId: 'local-default',
+  schemaVersion: 1 as const,
+  featureVersion: 'motion-features-v1',
+  preprocessingVersion: 'preprocess-v1',
+  playbackVersion: 'playback-v1',
+  minDurationMs: 500,
+  maxDurationMs: 8_000,
+  minObservedFrames: 8,
+  minValidTimeRatio: 0.9,
+  maxInterpolationGapMs: 150,
+  trackingLostGapMs: 250,
+  recognitionFrames: 64,
+  dtwBandRatio: 0.2,
+  defaultMaxDistance: 0.35,
+  defaultMinClassMargin: 0.15,
+  segmenter: {
+    preRollMs: 250,
+    startHoldMs: 120,
+    endHoldMs: 500,
+    cooldownMs: 600,
+    startThreshold: 0.035,
+    stopThreshold: 0.012,
+  },
+  import: {
+    maxBytes: 50 * 1024 * 1024,
+    maxFramesPerSample: 2_000,
+    maxGestures: 1_000,
+    maxSamples: 10_000,
+  },
+} as const;
+
+export const MEDIAPIPE_ASSETS = {
+  modelPath: '/models/hand_landmarker.task',
+  packageVersion: __MEDIAPIPE_VERSION__.replace(/^[~^]/, ''),
+} as const;

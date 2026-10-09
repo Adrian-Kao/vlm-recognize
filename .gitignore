@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+.vite/
+public/models/hand_landmarker.task
+public/models/hand_landmarker.task.sha256
+*.local
