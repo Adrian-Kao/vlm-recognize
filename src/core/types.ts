@@ -3,6 +3,9 @@ export type Vec3 = [number, number, number];
 export type HandSide = 'Left' | 'Right' | 'Unknown';
 export type HandMode = 'single' | 'dual';
 export type TrackRole = 'primary' | 'secondary';
+export type GestureMotionType = 'dynamic' | 'static-hold';
+export type PoseEvidence = 'model-estimate' | 'interpolated' | 'predicted' | 'missing';
+export type DiagnosticStatus = 'ok' | 'no-hand' | 'unstable-pose' | 'segment-not-triggered' | 'low-coverage' | 'rig-error';
 
 export interface TrackDefinition {
   trackId: string;
@@ -47,6 +50,16 @@ export interface MotionQuality {
   observedFrameCount: number;
   associationAmbiguous: boolean;
   warnings: string[];
+  diagnostics?: {
+    status: DiagnosticStatus;
+    durationMs: number;
+    observedFps: number;
+    palmCoverage: number;
+    fingerCoverage: number;
+    featureCoverage: number;
+    shortGapCount: number;
+    qualityPolicyVersion: string;
+  };
 }
 
 export interface MotionSample {
@@ -61,6 +74,7 @@ export interface MotionSample {
   trim: { startMs: number; endMs: number };
   quality: MotionQuality;
   createdAt: string;
+  motionType?: GestureMotionType;
 }
 
 export interface GestureRecord {
@@ -75,14 +89,25 @@ export interface GestureRecord {
   revision: number;
   createdAt: string;
   updatedAt: string;
+  motionType?: GestureMotionType;
+}
+
+export interface FeatureReliability {
+  localPose: number;
+  shape: number;
+  rootXY: number;
+  palmOrientation: number;
+  evidence: PoseEvidence;
 }
 
 export interface FeatureHand {
   role: TrackRole;
   side: HandSide;
   localPose: number[];
+  shape: number[];
   rootXY: Vec2;
   palmAxes: number[];
+  reliability: FeatureReliability;
 }
 
 export interface FeatureFrame {
@@ -102,6 +127,7 @@ export interface RecognitionTemplate {
   frames: FeatureFrame[];
   durationMs: number;
   derivedFrom: 'raw-motion';
+  motionType: GestureMotionType;
 }
 
 export interface CalibrationRecord {
@@ -112,6 +138,7 @@ export interface CalibrationRecord {
   minClassMargin: number | null;
   memoryRevision: number;
   featureVersion: string;
+  preprocessingVersion?: string;
   positiveCount: number;
   negativeCount: number;
   evaluatedAt: string | null;
@@ -147,6 +174,8 @@ export interface GestureMemoryExport {
     schemaVersion: 1;
     exportedAt: string;
     featureVersion: string;
+    preprocessingVersion?: string;
+    qualityPolicyVersion?: string;
   };
   gestures: GestureRecord[];
   samples: MotionSample[];
@@ -165,6 +194,7 @@ export interface PlaybackHandPose {
   side: HandSide;
   role: TrackRole;
   joints: Vec3[];
+  fittedJoints?: Vec3[];
 }
 
 export interface PlaybackPose {
@@ -179,4 +209,5 @@ export interface PlaybackClip {
   poses: PlaybackPose[];
   trajectoryByTrack: Record<string, Vec3[]>;
   warnings: string[];
+  gapRanges?: Array<{ startMs: number; endMs: number; interpolated: boolean }>;
 }

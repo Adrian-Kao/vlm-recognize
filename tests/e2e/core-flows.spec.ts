@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('合成 tracker 串起新增、重整持久化、辨識與 3D 重播', async ({ page }) => {
+test('合成 tracker 串起新增、重整持久化、辨識與 3D 重播', async ({ page }, testInfo) => {
   await page.goto('/?syntheticTracker=1');
   await expect(page.getByText('合成追蹤測試模式｜不代表真實攝影機已驗證')).toBeVisible();
   await page.getByRole('button', { name: '啟動合成追蹤' }).click();
@@ -8,6 +8,9 @@ test('合成 tracker 串起新增、重整持久化、辨識與 3D 重播', asyn
   await page.waitForTimeout(4_250);
   await page.getByRole('button', { name: '停止錄製' }).click();
   await expect(page.getByText('可儲存／可辨識')).toBeVisible();
+  await expect(page.getByTestId('hand-asset-status')).toContainText('GLB rig 已就緒', { timeout: 15_000 });
+  await expect(page.getByTestId('hand-asset-status')).toContainText('skin Δ');
+  await expect(page.getByTestId('hand-asset-status')).toHaveAttribute('data-skeleton-instances', '1');
   await page.getByLabel('自訂名稱').fill('測試滑動');
   await page.getByRole('button', { name: '儲存動作' }).click();
   await expect(page.getByText('測試滑動', { exact: true })).toBeVisible();
@@ -27,6 +30,13 @@ test('合成 tracker 串起新增、重整持久化、辨識與 3D 重播', asyn
   await page.getByLabel('搜尋已儲存的動作').fill('測試滑動');
   await page.getByRole('button', { name: /測試滑動/ }).click();
   await expect(page.getByTestId('hand-scene')).toBeVisible();
+  await expect(page.getByTestId('hand-asset-status')).toContainText('GLB rig 已就緒', { timeout: 15_000 });
+  await expect(page.getByTestId('hand-asset-status')).toContainText('skin Δ');
+  await expect(page.getByTestId('hand-asset-status')).toHaveAttribute('data-skeleton-instances', '1');
+  await page.getByTestId('hand-scene').screenshot({ path: testInfo.outputPath('glb-playback.png') });
+  await page.getByLabel('手部顯示模式').selectOption('raw');
+  await page.getByLabel('手部顯示模式').selectOption('fitted');
+  await page.getByLabel('手部顯示模式').selectOption('glb');
   await page.getByRole('button', { name: '播放', exact: true }).click();
   await page.waitForTimeout(250);
   await expect(page.getByRole('button', { name: '暫停', exact: true })).toBeVisible();

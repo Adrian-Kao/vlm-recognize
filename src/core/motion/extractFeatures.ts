@@ -1,6 +1,6 @@
 import { APP_CONFIG } from '../../app/config';
 import { MotionDataError } from '../errors';
-import { lerp3, median, sub3 } from '../math';
+import { distance3, lerp3, median, sub3 } from '../math';
 import type {
   FeatureFrame,
   FeatureHand,
@@ -13,10 +13,13 @@ import type {
   Vec3,
 } from '../types';
 import { imagePointToPixels, palmAxes, palmPixelScale, palmWorldScale } from './coordinates';
+import { canInterpolateGap } from './gapPolicy';
+import { estimateReliability } from '../tracking/estimateReliability';
 
 interface InterpolatedHand {
   observation: RawHandObservation;
   interpolated: boolean;
+  gapMs: number;
 }
 
 function interpolateObservation(
@@ -37,13 +40,16 @@ function interpolateObservation(
     }
   }
   if (!before || !after) throw new MotionDataError('片段端點缺少可靠手部追蹤', 'TRACKING_GAP');
-  if (after.tMs - before.tMs > APP_CONFIG.maxInterpolationGapMs) {
+  const gapMs = after.tMs - before.tMs;
+  const hasTrackingGap = frames.some((frame) => frame.tMs > before!.tMs && frame.tMs < after!.tMs
+    && !frame.hands.some((hand) => hand.trackId === trackId));
+  if (hasTrackingGap && !canInterpolateGap(gapMs)) {
     throw new MotionDataError('追蹤缺口超過可插值限制', 'TRACKING_GAP');
   }
   if (before.hand.diagnostics.associationAmbiguous || after.hand.diagnostics.associationAmbiguous) {
     throw new MotionDataError('手部身分配對不確定', 'INVALID_SAMPLE');
   }
-  if (before.tMs === after.tMs) return { observation: structuredClone(before.hand), interpolated: false };
+  if (before.tMs === after.tMs) return { observation: structuredClone(before.hand), interpolated: false, gapMs: 0 };
   if (!before.hand.worldLandmarks || !after.hand.worldLandmarks) {
     throw new MotionDataError('缺少 world landmarks', 'INVALID_LANDMARKS');
   }
@@ -57,7 +63,8 @@ function interpolateObservation(
       imageLandmarks: before.hand.imageLandmarks.map((point, index) => lerp3(point, after!.hand.imageLandmarks[index], amount)),
       worldLandmarks: before.hand.worldLandmarks.map((point, index) => lerp3(point, after!.hand.worldLandmarks![index], amount)),
     },
-    interpolated: true,
+    interpolated: hasTrackingGap,
+    gapMs: hasTrackingGap ? gapMs : 0,
   };
 }
 
@@ -70,6 +77,35 @@ function flattenLocalPose(points: Vec3[], wrist: Vec3, scale: number): number[] 
     const relative = sub3(point, wrist);
     return [relative[0] / scale, relative[1] / scale, relative[2] / scale];
   });
+}
+
+function jointAngle(a: Vec3, b: Vec3, c: Vec3): number {
+  const ab = sub3(a, b);
+  const cb = sub3(c, b);
+  const denominator = Math.max(1e-8, distance3(a, b) * distance3(c, b));
+  const cosine = Math.max(-1, Math.min(1, (ab[0] * cb[0] + ab[1] * cb[1] + ab[2] * cb[2]) / denominator));
+  return Math.acos(cosine) / Math.PI;
+}
+
+export function extractShapeFeatures(points: Vec3[], scale: number): number[] {
+  const chains = [[0, 1, 2, 3, 4], [0, 5, 6, 7, 8], [0, 9, 10, 11, 12], [0, 13, 14, 15, 16], [0, 17, 18, 19, 20]];
+  const flexion = chains.flatMap((chain) => [
+    jointAngle(points[chain[0]], points[chain[1]], points[chain[2]]),
+    jointAngle(points[chain[1]], points[chain[2]], points[chain[3]]),
+    jointAngle(points[chain[2]], points[chain[3]], points[chain[4]]),
+  ]);
+  const tips = [4, 8, 12, 16, 20];
+  const mcps = [1, 5, 9, 13, 17];
+  const palmCenter: Vec3 = [
+    (points[0][0] + points[5][0] + points[9][0] + points[13][0] + points[17][0]) / 5,
+    (points[0][1] + points[5][1] + points[9][1] + points[13][1] + points[17][1]) / 5,
+    (points[0][2] + points[5][2] + points[9][2] + points[13][2] + points[17][2]) / 5,
+  ];
+  const tipToMcp = tips.map((tip, index) => distance3(points[tip], points[mcps[index]]) / scale);
+  const tipToPalm = tips.map((tip) => distance3(points[tip], palmCenter) / scale);
+  const thumbIndexPinch = distance3(points[4], points[8]) / scale;
+  const openness = tipToPalm.reduce((sum, value) => sum + value, 0) / tipToPalm.length;
+  return [...flexion, ...tipToMcp, ...tipToPalm, thumbIndexPinch, openness];
 }
 
 export function extractFeatureFrames(sample: MotionSample, frameCount = APP_CONFIG.recognitionFrames): FeatureFrame[] {
@@ -95,10 +131,10 @@ export function extractFeatureFrames(sample: MotionSample, frameCount = APP_CONF
   }
 
   const times = Array.from({ length: frameCount }, (_, index) => sample.trim.startMs + duration * index / (frameCount - 1));
-  const interpolated = times.map((timeMs) => tracks.map((track) => ({
-    track,
-    hand: interpolateObservation(track.trackId, timeMs, sample).observation,
-  })));
+  const interpolated = times.map((timeMs) => tracks.map((track) => {
+    const result = interpolateObservation(track.trackId, timeMs, sample);
+    return { track, hand: result.observation, interpolated: result.interpolated, gapMs: result.gapMs };
+  }));
   const firstWrists = interpolated[0].map(({ hand }) => imagePointToPixels(hand.imageLandmarks[0], sample.capture.videoWidth, sample.capture.videoHeight));
   const origin: Vec2 = [
     firstWrists.reduce((sum, wrist) => sum + wrist[0], 0) / firstWrists.length,
@@ -106,15 +142,25 @@ export function extractFeatureFrames(sample: MotionSample, frameCount = APP_CONF
   ];
 
   return interpolated.map((handsAtTime, index): FeatureFrame => {
-    const hands = handsAtTime.map(({ track, hand }): FeatureHand => {
+    const hands = handsAtTime.map(({ track, hand, interpolated: wasInterpolated, gapMs }): FeatureHand => {
       if (!hand.worldLandmarks) throw new MotionDataError('缺少 world landmarks', 'INVALID_LANDMARKS');
       const wristPx = imagePointToPixels(hand.imageLandmarks[0], sample.capture.videoWidth, sample.capture.videoHeight);
+      const scale = worldScaleByTrack.get(track.trackId)!;
+      const reliability = estimateReliability(hand, wasInterpolated ? 'interpolated' : 'model-estimate', gapMs);
       return {
         role: track.role,
         side: track.side,
-        localPose: flattenLocalPose(hand.worldLandmarks, hand.worldLandmarks[0], worldScaleByTrack.get(track.trackId)!),
+        localPose: flattenLocalPose(hand.worldLandmarks, hand.worldLandmarks[0], scale),
+        shape: extractShapeFeatures(hand.worldLandmarks, scale),
         rootXY: [(wristPx[0] - origin[0]) / sharedPixelScale, (wristPx[1] - origin[1]) / sharedPixelScale],
         palmAxes: palmAxes(hand),
+        reliability: {
+          localPose: reliability.localPose,
+          shape: reliability.shape,
+          rootXY: reliability.rootXY,
+          palmOrientation: reliability.palmOrientation,
+          evidence: reliability.evidence,
+        },
       };
     });
     return {
@@ -140,5 +186,6 @@ export function buildRecognitionTemplate(sample: MotionSample): RecognitionTempl
     frames: extractFeatureFrames(sample),
     durationMs: sample.trim.endMs - sample.trim.startMs,
     derivedFrom: 'raw-motion',
+    motionType: sample.motionType ?? 'dynamic',
   };
 }

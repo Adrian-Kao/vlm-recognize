@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "assetPath": "/models/hands.glb",
+  "originalFilename": "hands.glb",
+  "sha256": "83b785d2df6c24c56fd07d967642d2e965cfebcd347205a5331152c9f410c221",
+  "byteLength": 596856,
+  "status": "rig-ready",
+  "detectedHands": "both",
+  "title": "Free Pack - VR Hands (Rigged)",
+  "author": "PolyOne Studio (https://sketchfab.com/polyone)",
+  "source": "https://sketchfab.com/3d-models/free-pack-vr-hands-rigged-b3b8309e59c748e3956531c8f57dd233",
+  "license": "CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)",
+  "licenseStatus": "metadata-declared",
+  "acquiredAt": null,
+  "inspectedAt": "2026-10-09T14:12:26.332Z",
+  "modifications": []
+}

@@ -68,7 +68,7 @@ export function GestureLibrary({ entries, repository, onChanged }: Props) {
             <article className="gesture-row" key={gesture.id}>
               <div className="gesture-main">
                 <span className="gesture-icon">{gesture.mode === 'dual' ? '雙' : '單'}</span>
-                <div><strong>{gesture.name}</strong><span>{samples.length} 份示範 · {calibration ? calibrationLabel[calibration.status] : '未校準'}</span></div>
+                <div><strong>{gesture.name}</strong><span>{samples.length} 份示範 · {(gesture.motionType ?? 'dynamic') === 'static-hold' ? '靜態保持' : '連續動態'} · {calibration ? calibrationLabel[calibration.status] : '未校準'}</span></div>
               </div>
               <div className="sample-list">
                 {samples.map((sample, index) => (

@@ -52,4 +52,37 @@ describe('自動切段狀態機', () => {
     const events = frames.flatMap((frame) => segmenter.push(frame));
     expect(events.some((event) => event.type === 'segment')).toBe(true);
   });
+
+  it('短缺口進入 TRACKING_PENDING 後可恢復，超過共用上限則 Invalid', () => {
+    const moving = makeSyntheticSample({ path: 'right', frameCount: 31, durationMs: 1_200 }).rawFrames;
+    const shortGapFrames = moving.map((frame, index) => index === 12 ? { ...frame, hands: [] } : frame);
+    const shortSegmenter = new MotionSegmenter();
+    const shortEvents = shortGapFrames.flatMap((frame) => shortSegmenter.push(frame));
+    expect(shortEvents.some((event) => event.type === 'state' && event.state === 'TRACKING_PENDING')).toBe(true);
+    expect(shortEvents.some((event) => event.type === 'invalid')).toBe(false);
+
+    const longSegmenter = new MotionSegmenter();
+    const base = structuredClone(moving[0].hands[0]);
+    const longFrames: RawMotionFrame[] = [
+      { tMs: 0, hands: [base] }, { tMs: 40, hands: [structuredClone(base)] },
+      { tMs: 100, hands: [] }, { tMs: 220, hands: [] }, { tMs: 360, hands: [] },
+    ];
+    const longEvents = longFrames.flatMap((frame) => longSegmenter.push(frame));
+    expect(longEvents.some((event) => event.type === 'invalid' && /缺口上限/.test(event.reason))).toBe(true);
+  });
+
+  it('static-hold 穩定 600ms 只觸發一次，釋放後才重新武裝', () => {
+    const sample = makeSyntheticSample({ path: 'still', pose: 'steady', durationMs: 1_000, frameCount: 21 });
+    const segmenter = new MotionSegmenter('static-hold');
+    const firstEvents = sample.rawFrames.flatMap((frame) => segmenter.push(frame));
+    expect(firstEvents.filter((event) => event.type === 'segment')).toHaveLength(1);
+
+    const last = structuredClone(sample.rawFrames.at(-1)!.hands[0]);
+    const release = structuredClone(last);
+    release.imageLandmarks = release.imageLandmarks.map(([x, y, z]) => [x + 0.14, y, z]);
+    const secondFrames: RawMotionFrame[] = [{ tMs: 1_050, hands: [release] }];
+    for (let time = 1_100; time <= 1_800; time += 50) secondFrames.push({ tMs: time, hands: [structuredClone(release)] });
+    const secondEvents = secondFrames.flatMap((frame) => segmenter.push(frame));
+    expect(secondEvents.filter((event) => event.type === 'segment')).toHaveLength(1);
+  });
 });

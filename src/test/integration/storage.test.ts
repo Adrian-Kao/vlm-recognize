@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import Dexie from 'dexie';
+import { APP_CONFIG } from '../../app/config';
 import { GestureDatabase } from '../../core/storage/db';
 import { GestureRepository } from '../../core/storage/GestureRepository';
 import { parseMemoryJson, serializeMemory } from '../../core/storage/transfer';
@@ -82,5 +84,38 @@ describe('IndexedDB 記憶庫', () => {
     expect(() => parseMemoryJson(JSON.stringify(malicious))).toThrow(/匯入格式錯誤/);
     expect((await repository.listLibrary())[0].gesture.name).toBe('保留我');
     database.close();
+  });
+
+  it('v1 資料升級只重建 derived template，rawFrames 保持不變且校準失效', async () => {
+    const name = `gesture-test-${crypto.randomUUID()}`;
+    names.push(name);
+    const legacy = new Dexie(name);
+    legacy.version(1).stores({
+      gestures: 'id, &[profileId+nameKey], profileId, updatedAt',
+      samples: 'id, gestureId, profileId, createdAt',
+      templates: 'sampleId, gestureId, profileId, [featureVersion+preprocessingVersion]',
+      calibrations: 'gestureId, profileId, status', settings: 'key', metadata: 'key',
+    });
+    await legacy.open();
+    const sample = { ...makeSyntheticSample(), id: 'legacy-sample', gestureId: 'legacy-gesture' };
+    const rawBefore = structuredClone(sample.rawFrames);
+    const now = new Date().toISOString();
+    await legacy.table('gestures').add({ id: 'legacy-gesture', profileId: APP_CONFIG.profileId, name: '舊動作', nameKey: '舊動作', aliases: [], mode: 'single', handednessPolicy: 'match-recording', representativeSampleId: null, revision: 1, createdAt: now, updatedAt: now });
+    await legacy.table('samples').add(sample);
+    await legacy.table('templates').add({ sampleId: sample.id, gestureId: sample.gestureId, profileId: APP_CONFIG.profileId, featureVersion: 'motion-features-v1', preprocessingVersion: 'preprocess-v1', frames: [], durationMs: 1_200, derivedFrom: 'raw-motion' });
+    await legacy.table('calibrations').add({ gestureId: sample.gestureId, profileId: APP_CONFIG.profileId, status: 'validated', maxDistance: 0.2, minClassMargin: 0.2, memoryRevision: 1, featureVersion: 'motion-features-v1', positiveCount: 3, negativeCount: 3, evaluatedAt: now });
+    legacy.close();
+
+    const upgradedDb = new GestureDatabase(name);
+    const repository = new GestureRepository(upgradedDb);
+    const memory = await repository.getRecognitionMemory();
+    const restored = (await repository.listLibrary())[0];
+    expect(restored.samples[0].rawFrames).toEqual(rawBefore);
+    expect(restored.gesture.motionType).toBe('dynamic');
+    expect(memory.templates[0].featureVersion).toBe(APP_CONFIG.featureVersion);
+    expect(memory.templates[0].frames[0].hands[0].shape.length).toBeGreaterThan(10);
+    expect(memory.calibrations[0].status).toBe('stale');
+    expect(memory.calibrations[0].preprocessingVersion).toBe(APP_CONFIG.preprocessingVersion);
+    upgradedDb.close();
   });
 });

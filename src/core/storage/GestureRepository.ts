@@ -13,6 +13,8 @@ import type {
 } from '../types';
 import { GestureDatabase, db as defaultDb } from './db';
 
+const DERIVED_PIPELINE_VERSION = `${APP_CONFIG.featureVersion}|${APP_CONFIG.preprocessingVersion}`;
+
 export function normalizeGestureName(input: string): { name: string; nameKey: string } {
   const name = input.trim().normalize('NFC');
   if (name.length < 1 || name.length > 60) throw new Error('動作名稱必須為 1–60 個字元');
@@ -28,6 +30,7 @@ function calibrationFor(gestureId: string, sampleCount: number, memoryRevision: 
     minClassMargin: null,
     memoryRevision,
     featureVersion: APP_CONFIG.featureVersion,
+    preprocessingVersion: APP_CONFIG.preprocessingVersion,
     positiveCount: sampleCount,
     negativeCount: 0,
     evaluatedAt: null,
@@ -35,7 +38,31 @@ function calibrationFor(gestureId: string, sampleCount: number, memoryRevision: 
 }
 
 export class GestureRepository {
+  private derivedRefresh: Promise<void> | null = null;
+
   constructor(public readonly database: GestureDatabase = defaultDb) {}
+
+  private ensureCurrentDerivedData(): Promise<void> {
+    this.derivedRefresh ??= this.database.transaction('rw', this.database.samples, this.database.templates,
+      this.database.calibrations, this.database.metadata, async () => {
+        const marker = await this.database.metadata.get('derivedFeatureVersion');
+        if (marker?.value === DERIVED_PIPELINE_VERSION) return;
+        const samples = await this.database.samples.toArray();
+        const rebuilt = samples.map((sample) => buildRecognitionTemplate({ ...sample, motionType: sample.motionType ?? 'dynamic' }));
+        await this.database.templates.clear();
+        if (rebuilt.length) await this.database.templates.bulkPut(rebuilt);
+        await this.database.calibrations.toCollection().modify((calibration) => {
+          calibration.status = 'stale';
+          calibration.featureVersion = APP_CONFIG.featureVersion;
+          calibration.preprocessingVersion = APP_CONFIG.preprocessingVersion;
+        });
+        await this.database.metadata.put({ key: 'derivedFeatureVersion', value: DERIVED_PIPELINE_VERSION });
+      }).catch((error) => {
+        this.derivedRefresh = null;
+        throw error;
+      });
+    return this.derivedRefresh;
+  }
 
   async getMemoryRevision(): Promise<number> {
     const record = await this.database.metadata.get('memoryRevision');
@@ -65,6 +92,8 @@ export class GestureRepository {
       this.database.calibrations, this.database.metadata, async () => {
         const existing = await this.database.gestures.where('[profileId+nameKey]').equals([APP_CONFIG.profileId, nameKey]).first();
         if (existing && existing.mode !== mode) throw new Error('同名動作的單手／雙手模式不相容，請使用不同名稱');
+        const motionType = input.motionType ?? 'dynamic';
+        if (existing && (existing.motionType ?? 'dynamic') !== motionType) throw new Error('同名動作的動態／靜態保持模式不相容，請使用不同名稱');
         const now = new Date().toISOString();
         const gesture: GestureRecord = existing ?? {
           id: crypto.randomUUID(),
@@ -78,6 +107,7 @@ export class GestureRepository {
           revision: 1,
           createdAt: now,
           updatedAt: now,
+          motionType,
         };
         if (existing) {
           const first = await this.database.samples.where('gestureId').equals(existing.id).first();
@@ -92,6 +122,7 @@ export class GestureRepository {
           id: input.id || crypto.randomUUID(),
           gestureId: gesture.id,
           profileId: APP_CONFIG.profileId,
+          motionType,
         };
         const template = buildRecognitionTemplate(sample);
         await this.database.samples.add(sample);
@@ -109,7 +140,7 @@ export class GestureRepository {
   async appendSample(gestureId: string, input: MotionSample): Promise<void> {
     const gesture = await this.database.gestures.get(gestureId);
     if (!gesture) throw new Error('找不到要追加的動作');
-    await this.saveNamedSample(gesture.name, gesture.mode, input);
+    await this.saveNamedSample(gesture.name, gesture.mode, { ...input, motionType: gesture.motionType ?? 'dynamic' });
   }
 
   async renameGesture(gestureId: string, input: string): Promise<void> {
@@ -168,6 +199,7 @@ export class GestureRepository {
   }
 
   async getRecognitionMemory() {
+    await this.ensureCurrentDerivedData();
     return {
       gestures: await this.database.gestures.where('profileId').equals(APP_CONFIG.profileId).toArray(),
       templates: await this.database.templates.where('profileId').equals(APP_CONFIG.profileId).toArray(),
@@ -186,6 +218,7 @@ export class GestureRepository {
   }
 
   async selectPlaybackSample(gestureId: string): Promise<MotionSample | null> {
+    await this.ensureCurrentDerivedData();
     const gesture = await this.database.gestures.get(gestureId);
     const samples = await this.database.samples.where('gestureId').equals(gestureId).toArray();
     const usable = samples.filter((sample) => isQualityAcceptable(sample.quality));
@@ -217,6 +250,8 @@ export class GestureRepository {
         schemaVersion: 1,
         exportedAt: new Date().toISOString(),
         featureVersion: APP_CONFIG.featureVersion,
+        preprocessingVersion: APP_CONFIG.preprocessingVersion,
+        qualityPolicyVersion: APP_CONFIG.qualityPolicyVersion,
       },
       gestures: await this.database.gestures.where('profileId').equals(APP_CONFIG.profileId).toArray(),
       samples: await this.database.samples.where('profileId').equals(APP_CONFIG.profileId).toArray(),
@@ -235,8 +270,8 @@ export class GestureRepository {
   }
 
   async replaceAll(data: GestureMemoryExport): Promise<void> {
-    const gestures = data.gestures.map((gesture) => ({ ...structuredClone(gesture), profileId: APP_CONFIG.profileId }));
-    const samples = data.samples.map((sample) => ({ ...structuredClone(sample), profileId: APP_CONFIG.profileId }));
+    const gestures = data.gestures.map((gesture) => ({ ...structuredClone(gesture), profileId: APP_CONFIG.profileId, motionType: gesture.motionType ?? 'dynamic' }));
+    const samples = data.samples.map((sample) => ({ ...structuredClone(sample), profileId: APP_CONFIG.profileId, motionType: sample.motionType ?? 'dynamic' }));
     const templates: RecognitionTemplate[] = samples.map(buildRecognitionTemplate);
     await this.database.transaction('rw', [this.database.gestures, this.database.samples, this.database.templates,
       this.database.calibrations, this.database.settings, this.database.metadata], async () => {
@@ -253,6 +288,7 @@ export class GestureRepository {
           await this.database.calibrations.put(calibrationFor(gesture.id, count, revision));
         }
         await this.database.settings.bulkPut(Object.entries(data.settings).map(([key, value]) => ({ key, value })));
+        await this.database.metadata.put({ key: 'derivedFeatureVersion', value: DERIVED_PIPELINE_VERSION });
       });
   }
 
@@ -285,12 +321,14 @@ export class GestureRepository {
       gestures.push({
         ...structuredClone(importedGesture), id: gestureId, profileId: APP_CONFIG.profileId,
         name: normalized.name, nameKey: normalized.nameKey,
+        motionType: importedGesture.motionType ?? 'dynamic',
         representativeSampleId: importedGesture.representativeSampleId ? idMap.get(importedGesture.representativeSampleId) ?? null : null,
         revision: 1, createdAt: now, updatedAt: now,
       });
       for (const source of sourceSamples) {
         const sample: MotionSample = {
           ...structuredClone(source), id: idMap.get(source.id)!, gestureId, profileId: APP_CONFIG.profileId,
+          motionType: source.motionType ?? importedGesture.motionType ?? 'dynamic',
         };
         samples.push(sample);
         templates.push(buildRecognitionTemplate(sample));
@@ -307,6 +345,7 @@ export class GestureRepository {
         await this.database.calibrations.bulkPut(gestures.map((gesture) => calibrationFor(
           gesture.id, samples.filter((sample) => sample.gestureId === gesture.id).length, revision,
         )));
+        await this.database.metadata.put({ key: 'derivedFeatureVersion', value: DERIVED_PIPELINE_VERSION });
       });
   }
 }

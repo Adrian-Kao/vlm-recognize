@@ -38,6 +38,7 @@ export function classifySample(
   }
 
   const compatible = memory.templates.filter((template) => template.mode === queryTemplate.mode
+    && (template.motionType ?? 'dynamic') === (queryTemplate.motionType ?? 'dynamic')
     && template.featureVersion === APP_CONFIG.featureVersion
     && template.preprocessingVersion === APP_CONFIG.preprocessingVersion
     && template.frames[0]?.hands.every((hand, index) => hand.side === queryTemplate.frames[0]?.hands[index]?.side));
@@ -64,8 +65,11 @@ export function classifySample(
   const best = ranked[0];
   const second = ranked[1];
   const calibration = memory.calibrations.find((item) => item.gestureId === best.gestureId);
-  const maxDistance = calibration?.maxDistance ?? APP_CONFIG.defaultMaxDistance;
-  const minMargin = calibration?.minClassMargin ?? APP_CONFIG.defaultMinClassMargin;
+  const activeCalibration = calibration?.status !== 'stale'
+    && calibration?.featureVersion === APP_CONFIG.featureVersion
+    && calibration?.preprocessingVersion === APP_CONFIG.preprocessingVersion ? calibration : null;
+  const maxDistance = activeCalibration?.maxDistance ?? APP_CONFIG.defaultMaxDistance;
+  const minMargin = activeCalibration?.minClassMargin ?? APP_CONFIG.defaultMinClassMargin;
   const margin = second ? (second.distance - best.distance) / Math.max(second.distance, 1e-8) : null;
   const base = {
     segmentId,

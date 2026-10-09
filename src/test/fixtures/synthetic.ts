@@ -9,13 +9,14 @@ const OPEN_HAND_WORLD: Vec3[] = [
   [0.5, 0.38, 0], [0.58, 0.66, -0.01], [0.63, 0.88, 0], [0.68, 1.07, 0],
 ];
 
-function syntheticDetection(timestampMs: number, side: 'Left' | 'Right' = 'Right', offset = 0): TrackerDetection {
-  const phase = ((timestampMs / 1800) % 1 + offset) % 1;
-  const rootX = 0.5 + 0.23 * Math.sin(phase * Math.PI * 2);
+function syntheticDetection(timestampMs: number, side: 'Left' | 'Right' = 'Right', centerX = 0.5, phaseOffset = 0): TrackerDetection {
+  const phase = ((timestampMs / 1800) % 1 + phaseOffset) % 1;
+  const rootX = centerX + 0.14 * Math.sin(phase * Math.PI * 2);
   const flex = 0.1 + 0.1 * Math.sin(phase * Math.PI * 2);
   const worldLandmarks = OPEN_HAND_WORLD.map((point, index): Vec3 => {
     const fingerJoint = index > 4 ? index % 4 : 0;
-    return [point[0], point[1] - flex * fingerJoint, point[2] + flex * fingerJoint * 0.35];
+    const x = side === 'Left' ? -point[0] : point[0];
+    return [x, point[1] - flex * fingerJoint, point[2] + flex * fingerJoint * 0.35];
   });
   const imageLandmarks = worldLandmarks.map((point): Vec3 => [
     rootX + point[0] * 0.105,
@@ -26,11 +27,9 @@ function syntheticDetection(timestampMs: number, side: 'Left' | 'Right' = 'Right
 }
 
 export function makeSyntheticDetections(timestampMs: number, dual = false): TrackerDetection[] {
-  const primary = syntheticDetection(timestampMs, 'Right');
+  const primary = syntheticDetection(timestampMs, 'Right', dual ? 0.42 : 0.5);
   if (!dual) return [primary];
-  const secondary = syntheticDetection(timestampMs, 'Left', 0.5);
-  secondary.imageLandmarks = secondary.imageLandmarks.map(([x, y, z]) => [1 - x, y, z]);
-  secondary.worldLandmarks = secondary.worldLandmarks?.map(([x, y, z]) => [-x, y, z]) ?? null;
+  const secondary = syntheticDetection(timestampMs, 'Left', 0.58);
   return [primary, secondary];
 }
 

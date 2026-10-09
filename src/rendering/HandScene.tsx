@@ -1,13 +1,19 @@
 import { Canvas, useThree } from '@react-three/fiber';
 import { Grid, Line, OrbitControls } from '@react-three/drei';
-import { useEffect, useMemo } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 import type { PlaybackClip } from '../core/types';
 import { samplePlaybackPose } from '../core/playback/samplePlaybackPose';
+import { HAND_RIG_MAP } from '../core/rig/handRigMap';
+import { validateHandAsset } from '../core/rig/validateHandAsset';
 import { LandmarkDebug } from './LandmarkDebug';
 import { ProceduralHand } from './ProceduralHand';
+import { RiggedHands } from './RiggedHands';
+import { HandAssetBoundary } from './HandAssetBoundary';
+import type { RigBounds } from '../core/rig/applyRigPose';
 
 export type CameraPreset = 'front' | 'side' | 'back';
+export type HandViewMode = 'glb' | 'raw' | 'fitted';
 
 function CameraRig({ preset, resetToken }: { preset: CameraPreset; resetToken: number }) {
   const { camera } = useThree();
@@ -29,12 +35,28 @@ interface HandSceneProps {
   timeMs: number;
   showTrajectory: boolean;
   debugSkeleton: boolean;
+  viewMode: HandViewMode;
   cameraPreset: CameraPreset;
   resetToken: number;
 }
 
-export function HandScene({ clip, timeMs, showTrajectory, debugSkeleton, cameraPreset, resetToken }: HandSceneProps) {
+export function HandScene({ clip, timeMs, showTrajectory, debugSkeleton, viewMode, cameraPreset, resetToken }: HandSceneProps) {
   const pose = useMemo(() => samplePlaybackPose(clip, timeMs), [clip, timeMs]);
+  const [assetState, setAssetState] = useState<'checking' | 'loading' | 'ready' | 'error'>('checking');
+  const [assetError, setAssetError] = useState('');
+  const [rigBounds, setRigBounds] = useState<RigBounds | null>(null);
+  useEffect(() => {
+    let active = true;
+    void validateHandAsset().then((result) => {
+      if (!active) return;
+      if (result.status === 'ready') setAssetState('loading');
+      else { setAssetState('error'); setAssetError(result.message); }
+    });
+    return () => { active = false; };
+  }, []);
+  const markReady = useCallback((bounds: RigBounds) => { setRigBounds(bounds); setAssetState('ready'); }, []);
+  const markError = useCallback((message: string) => { setAssetState('error'); setAssetError(message); }, []);
+  const fallbackHands = pose.hands.map((hand) => <ProceduralHand key={`fallback-${hand.trackId}`} pose={hand} />);
   return (
     <div className="hand-scene" data-testid="hand-scene">
       <Canvas shadows="basic" dpr={[1, 1.75]} camera={{ fov: 42, near: 0.01, far: 100, position: [0, 0.4, 5.2] }}
@@ -45,8 +67,17 @@ export function HandScene({ clip, timeMs, showTrajectory, debugSkeleton, cameraP
         <directionalLight position={[3, 5, 4]} intensity={2.1} castShadow shadow-mapSize={[1024, 1024]} />
         <pointLight position={[-4, 1, 2]} intensity={18} color="#5fe7ff" distance={9} />
         <group position={[0, -0.25, 0]}>
-          {pose.hands.map((hand) => <ProceduralHand key={hand.trackId} pose={hand} />)}
-          {debugSkeleton && pose.hands.map((hand) => <LandmarkDebug key={`debug-${hand.trackId}`} pose={hand} />)}
+          {viewMode === 'glb' && assetState !== 'error' && assetState !== 'checking' ? (
+            <HandAssetBoundary fallback={fallbackHands} onError={markError}>
+              <Suspense fallback={fallbackHands}><RiggedHands hands={pose.hands} onReady={markReady} /></Suspense>
+            </HandAssetBoundary>
+          ) : null}
+          {viewMode === 'glb' && (assetState === 'checking' || assetState === 'error') && fallbackHands}
+          {viewMode === 'fitted' && pose.hands.map((hand) => {
+            const fitted = { ...hand, joints: hand.fittedJoints ?? hand.joints };
+            return <group key={hand.trackId}><ProceduralHand pose={fitted} /><LandmarkDebug pose={fitted} color="#b9ff66" /></group>;
+          })}
+          {(viewMode === 'raw' || debugSkeleton) && pose.hands.map((hand) => <LandmarkDebug key={`debug-${hand.trackId}`} pose={hand} />)}
           {showTrajectory && Object.entries(clip.trajectoryByTrack).map(([trackId, points]) => (
             <Line key={trackId} points={points} color="#f7c86d" lineWidth={2} dashed dashSize={0.08} gapSize={0.05} />
           ))}
@@ -56,6 +87,11 @@ export function HandScene({ clip, timeMs, showTrajectory, debugSkeleton, cameraP
         <CameraRig preset={cameraPreset} resetToken={resetToken} />
       </Canvas>
       <span className="scene-badge">展示座標｜全域深度未經量測</span>
+      {viewMode === 'glb' && <span className={`asset-badge ${assetState}`} data-testid="hand-asset-status" data-skeleton-instances={pose.hands.length}>
+        {assetState === 'ready' ? `GLB rig 已就緒｜${HAND_RIG_MAP.rigVersion}｜${pose.hands.length} skeleton clone${rigBounds ? `｜bbox ${rigBounds.size.map((value) => value.toFixed(1)).join('×')}｜skin Δ ${rigBounds.deformationCheck.delta.toFixed(3)}` : ''}`
+          : assetState === 'error' ? `GLB 錯誤，程序化降級｜${assetError}`
+            : '正在驗證並載入 GLB rig…'}
+      </span>}
     </div>
   );
 }

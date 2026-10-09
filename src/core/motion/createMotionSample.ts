@@ -1,5 +1,5 @@
 import { APP_CONFIG, MEDIAPIPE_ASSETS } from '../../app/config';
-import type { CaptureMetadata, HandMode, MotionSample, RawMotionFrame, TrackDefinition } from '../types';
+import type { CaptureMetadata, GestureMotionType, HandMode, MotionSample, RawMotionFrame, TrackDefinition } from '../types';
 import { assessMotionQuality } from './quality';
 
 export interface CaptureContext {
@@ -14,6 +14,7 @@ export function createMotionSample(
   inputFrames: RawMotionFrame[],
   mode: HandMode,
   capture: CaptureContext,
+  motionType: GestureMotionType = 'dynamic',
 ): MotionSample {
   if (inputFrames.length < 2) throw new Error('沒有足夠影格可建立動作片段');
   const start = inputFrames[0].tMs;
@@ -59,5 +60,6 @@ export function createMotionSample(
     trim: { startMs: 0, endMs },
     quality,
     createdAt: new Date().toISOString(),
+    motionType,
   };
 }

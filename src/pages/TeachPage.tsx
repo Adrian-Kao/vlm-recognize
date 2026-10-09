@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GestureRepository } from '../core/storage/GestureRepository';
-import type { GestureLibraryEntry, HandMode, MotionSample, RawMotionFrame } from '../core/types';
+import type { GestureLibraryEntry, GestureMotionType, HandMode, MotionSample, RawMotionFrame } from '../core/types';
 import { CameraPreview, type CameraFramePacket } from '../components/CameraPreview';
 import { createMotionSample, type CaptureContext } from '../core/motion/createMotionSample';
 import { assessMotionQuality, isQualityAcceptable } from '../core/motion/quality';
@@ -17,6 +17,7 @@ interface Props {
 
 export function TeachPage({ repository, entries, refreshLibrary }: Props) {
   const [mode, setMode] = useState<HandMode>('single');
+  const [motionType, setMotionType] = useState<GestureMotionType>('dynamic');
   const [mirror, setMirror] = useState(true);
   const [showLandmarks, setShowLandmarks] = useState(true);
   const [cameraActive, setCameraActive] = useState(false);
@@ -31,9 +32,11 @@ export function TeachPage({ repository, entries, refreshLibrary }: Props) {
   const captureContext = useRef<CaptureContext | null>(null);
   const recordingRef = useRef(false);
   const modeRef = useRef(mode);
+  const motionTypeRef = useRef(motionType);
   const countdownTimer = useRef<number | null>(null);
 
   useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { motionTypeRef.current = motionType; }, [motionType]);
   useEffect(() => () => { if (countdownTimer.current !== null) window.clearInterval(countdownTimer.current); }, []);
 
   const finishRecording = useCallback(() => {
@@ -42,7 +45,7 @@ export function TeachPage({ repository, entries, refreshLibrary }: Props) {
     setRecording(false);
     try {
       if (!captureContext.current) throw new Error('缺少擷取資訊');
-      const sample = createMotionSample(frameBuffer.current, modeRef.current, captureContext.current);
+      const sample = createMotionSample(frameBuffer.current, modeRef.current, captureContext.current, motionTypeRef.current);
       setPreview(sample);
       setMessage(sample.quality.warnings.length === 0 ? '錄製完成。請預覽、裁切並命名。' : '錄製完成，但品質不足；請檢查後重錄。');
     } catch (error) {
@@ -124,6 +127,9 @@ export function TeachPage({ repository, entries, refreshLibrary }: Props) {
             <label>手部模式<select value={mode} onChange={(event) => setMode(event.target.value as HandMode)} disabled={recording || countdown > 0}>
               <option value="single">單手</option><option value="dual">雙手（基礎）</option>
             </select></label>
+            <label>動作類型<select value={motionType} onChange={(event) => setMotionType(event.target.value as GestureMotionType)} disabled={recording || countdown > 0}>
+              <option value="dynamic">連續動態</option><option value="static-hold">靜態保持</option>
+            </select></label>
             <label className="check"><input type="checkbox" checked={mirror} onChange={(event) => setMirror(event.target.checked)} /> 鏡像預覽</label>
             <label className="check"><input type="checkbox" checked={showLandmarks} onChange={(event) => setShowLandmarks(event.target.checked)} /> landmarks overlay</label>
             <span className="tracking-pill">{trackingLabel}</span>
@@ -137,12 +143,12 @@ export function TeachPage({ repository, entries, refreshLibrary }: Props) {
             {!recording
               ? <button type="button" className="button primary large" onClick={beginCountdown} disabled={countdown > 0}>錄製一次</button>
               : <button type="button" className="button danger large" onClick={finishRecording}>停止錄製</button>}
-            <span>倒數 3 秒不計入片段；達 8 秒會自動停止。</span>
+            <span>{motionType === 'static-hold' ? '保持姿態至少 0.6 秒；仍會保存完整真實片段。' : '倒數 3 秒不計入片段；達 8 秒會自動停止。'}</span>
           </div>
         </div>
         <aside className="side-column">
           <span className="eyebrow">RECORDING CHECK</span><h2>片段預覽</h2>
-          {!preview ? <div className="empty-state tall"><strong>等待一次錄製</strong><p>錄製後會立即以程序化立體手預覽實際片段。</p></div> : (
+          {!preview ? <div className="empty-state tall"><strong>等待一次錄製</strong><p>錄製後會立即以 GLB 綁骨手預覽；資產失敗時明示程序化降級。</p></div> : (
             <>
               <QualitySummary sample={preview} />
               <ClipPlayer sample={preview} compact />

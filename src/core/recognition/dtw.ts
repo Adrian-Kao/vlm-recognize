@@ -13,12 +13,40 @@ export function featureFrameCost(a: FeatureFrame, b: FeatureFrame): number {
   const handsB = [...b.hands].sort((left, right) => left.role.localeCompare(right.role));
   if (!handsA.every((hand, index) => compatibleHand(hand, handsB[index]))) return Number.POSITIVE_INFINITY;
 
-  const pose = handsA.reduce((sum, hand, index) => sum + mse(hand.localPose, handsB[index].localPose), 0) / handsA.length;
-  const root = handsA.reduce((sum, hand, index) => sum + mse(hand.rootXY, handsB[index].rootXY), 0) / handsA.length;
-  const axes = handsA.reduce((sum, hand, index) => sum + mse(hand.palmAxes, handsB[index].palmAxes), 0) / handsA.length;
-  if (handsA.length === 1) return 0.5 * pose + 0.35 * root + 0.15 * axes;
+  const weights = handsA.length === 1
+    ? { pose: 0.50, shape: 0.10, root: 0.29, axes: 0.11, inter: 0 }
+    : { pose: 0.28, shape: 0.18, root: 0.22, axes: 0.12, inter: 0.20 };
+  let weightedError = 0;
+  let commonWeight = 0;
+  let informativeWeight = 0;
+  const hasDerivedGap = handsA.some((hand, index) => hand.reliability.evidence !== 'model-estimate'
+    || handsB[index].reliability.evidence !== 'model-estimate');
+  const add = (error: number, weight: number, reliabilityA: number, reliabilityB: number, informative = true) => {
+    if (!Number.isFinite(error)) return;
+    const effective = weight * reliabilityA * reliabilityB;
+    weightedError += effective * error;
+    commonWeight += effective;
+    if (informative) informativeWeight += effective;
+  };
+  for (let index = 0; index < handsA.length; index += 1) {
+    const left = handsA[index];
+    const right = handsB[index];
+    const divisor = handsA.length;
+    add(mse(left.localPose, right.localPose), weights.pose / divisor, left.reliability.localPose, right.reliability.localPose);
+    add(mse(left.shape, right.shape), weights.shape / divisor, left.reliability.shape, right.reliability.shape);
+    add(mse(left.rootXY, right.rootXY), weights.root / divisor, left.reliability.rootXY, right.reliability.rootXY, false);
+    add(mse(left.palmAxes, right.palmAxes), weights.axes / divisor, left.reliability.palmOrientation, right.reliability.palmOrientation);
+  }
+  if (handsA.length === 1) {
+    if (commonWeight < APP_CONFIG.minCommonFeatureWeight || informativeWeight < APP_CONFIG.minInformativeFeatureWeight) return Number.POSITIVE_INFINITY;
+    return weightedError / commonWeight + (hasDerivedGap ? (1 - commonWeight) * APP_CONFIG.missingFeaturePenalty : 0);
+  }
   if (!a.interHandXY || !b.interHandXY) return Number.POSITIVE_INFINITY;
-  return 0.4 * pose + 0.25 * root + 0.15 * axes + 0.2 * mse(a.interHandXY, b.interHandXY);
+  const interReliabilityA = Math.min(...handsA.map((hand) => hand.reliability.rootXY));
+  const interReliabilityB = Math.min(...handsB.map((hand) => hand.reliability.rootXY));
+  add(mse(a.interHandXY, b.interHandXY), weights.inter, interReliabilityA, interReliabilityB);
+  if (commonWeight < APP_CONFIG.minCommonFeatureWeight || informativeWeight < APP_CONFIG.minInformativeFeatureWeight) return Number.POSITIVE_INFINITY;
+  return weightedError / commonWeight + (hasDerivedGap ? (1 - commonWeight) * APP_CONFIG.missingFeaturePenalty : 0);
 }
 
 interface Cell { cost: number; length: number }

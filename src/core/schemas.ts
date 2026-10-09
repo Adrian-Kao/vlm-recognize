@@ -4,6 +4,7 @@ import { APP_CONFIG } from '../app/config';
 const finiteNumber = z.number().refine(Number.isFinite, '數值必須有限');
 const vec3Schema = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
 const sideSchema = z.enum(['Left', 'Right', 'Unknown']);
+const motionTypeSchema = z.enum(['dynamic', 'static-hold']);
 
 export const rawHandObservationSchema = z.object({
   trackId: z.string().min(1).max(100),
@@ -56,6 +57,7 @@ export const motionSampleSchema = z.object({
     warnings: z.array(z.string().max(500)).max(100),
   }),
   createdAt: z.string().datetime(),
+  motionType: motionTypeSchema.optional().default('dynamic'),
 }).superRefine((sample, context) => {
   for (let index = 1; index < sample.rawFrames.length; index += 1) {
     if (sample.rawFrames[index].tMs <= sample.rawFrames[index - 1].tMs) {
@@ -81,6 +83,7 @@ export const gestureRecordSchema = z.object({
   revision: z.number().int().positive(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  motionType: motionTypeSchema.optional().default('dynamic'),
 });
 
 export const gestureMemoryExportSchema = z.object({
@@ -89,6 +92,8 @@ export const gestureMemoryExportSchema = z.object({
     schemaVersion: z.literal(1),
     exportedAt: z.string().datetime(),
     featureVersion: z.string().min(1).max(100),
+    preprocessingVersion: z.string().min(1).max(100).optional(),
+    qualityPolicyVersion: z.string().min(1).max(100).optional(),
   }),
   gestures: z.array(gestureRecordSchema).max(APP_CONFIG.import.maxGestures),
   samples: z.array(motionSampleSchema).max(APP_CONFIG.import.maxSamples),

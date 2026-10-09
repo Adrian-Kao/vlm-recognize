@@ -10,6 +10,7 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest",
     "test:e2e": "playwright test",
+    "inspect:hand": "node scripts/inspect-hand-glb.mjs",
     "setup:assets": "node scripts/setup-assets.mjs"
   },
   "dependencies": {

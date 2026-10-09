@@ -9,12 +9,18 @@ export function samplePlaybackPose(clip: PlaybackClip, inputTimeMs: number): Pla
   if (rightIndex < 1) rightIndex = 1;
   const left = clip.poses[rightIndex - 1];
   const right = clip.poses[rightIndex];
+  const heldGap = clip.gapRanges?.find((gap) => !gap.interpolated && timeMs > gap.startMs && timeMs < gap.endMs);
+  if (heldGap) return { ...structuredClone(left), tMs: timeMs };
   const amount = (timeMs - left.tMs) / Math.max(1e-8, right.tMs - left.tMs);
   return {
     tMs: timeMs,
     hands: left.hands.map((hand) => {
       const other = right.hands.find((candidate) => candidate.trackId === hand.trackId) ?? hand;
-      return { ...hand, joints: hand.joints.map((point, index) => lerp3(point, other.joints[index], amount)) };
+      return {
+        ...hand,
+        joints: hand.joints.map((point, index) => lerp3(point, other.joints[index], amount)),
+        fittedJoints: hand.fittedJoints?.map((point, index) => lerp3(point, other.fittedJoints?.[index] ?? point, amount)),
+      };
     }),
   };
 }

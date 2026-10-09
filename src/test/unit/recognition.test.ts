@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildRecognitionTemplate } from '../../core/motion/extractFeatures';
-import { dtwDistance } from '../../core/recognition/dtw';
+import { dtwDistance, featureFrameCost } from '../../core/recognition/dtw';
 import { classifySample } from '../../core/recognition/classify';
 import { makeSyntheticSample } from '../fixtures/synthetic';
 import type { GestureRecord, RecognitionTemplate } from '../../core/types';
@@ -46,6 +46,19 @@ describe('多變量 DTW 與拒絕式分類', () => {
     expect(result.distance).toBeGreaterThan(0.35);
   });
 
+  it('舊 preprocessing 的 stale 校準不會放寬未知動作門檻', () => {
+    const stored = template('right-sample', 'right', { path: 'right', pose: 'steady' });
+    const query = makeSyntheticSample({ path: 'up', pose: 'close-open' });
+    const result = classifySample(query, {
+      gestures: [gesture('right', '向右')], templates: [stored], memoryRevision: 1,
+      calibrations: [{ gestureId: 'right', profileId: 'local-default', status: 'stale', maxDistance: 999,
+        minClassMargin: 0, memoryRevision: 1, featureVersion: stored.featureVersion,
+        preprocessingVersion: 'preprocess-v1', positiveCount: 99, negativeCount: 99, evaluatedAt: new Date().toISOString() }],
+    }, 'segment-stale');
+    expect(result.status).toBe('unknown');
+    expect(result.calibrationStatus).toBe('stale');
+  });
+
   it('兩個不同類別使用相同模板時回報 Ambiguous，候選不重複類別', () => {
     const a = template('sample-a', 'a', { path: 'right' });
     const b = { ...a, sampleId: 'sample-b', gestureId: 'b' };
@@ -77,5 +90,27 @@ describe('多變量 DTW 與拒絕式分類', () => {
     const longGap = makeSyntheticSample({ frameCount: 31, durationMs: 1_200 });
     for (let index = 10; index <= 16; index += 1) longGap.rawFrames[index].hands = [];
     expect(() => buildRecognitionTemplate(longGap)).toThrow(/缺口/);
+  });
+
+  it('短追蹤缺口可標記插值，但幾乎無共同資訊不能得到完美距離', () => {
+    const shortGap = makeSyntheticSample({ frameCount: 31, durationMs: 1_200 });
+    shortGap.rawFrames[10].hands = [];
+    const frames = buildRecognitionTemplate(shortGap).frames;
+    expect(frames.some((frame) => frame.hands.some((hand) => hand.reliability.evidence === 'interpolated'))).toBe(true);
+
+    const unknownA = structuredClone(frames[0]);
+    const unknownB = structuredClone(frames[0]);
+    for (const frame of [unknownA, unknownB]) {
+      frame.hands[0].reliability = { localPose: 0, shape: 0, rootXY: 0, palmOrientation: 0, evidence: 'missing' };
+    }
+    expect(featureFrameCost(unknownA, unknownB)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('static-hold query 不會混入動態模板', () => {
+    const dynamic = template('dynamic', 'dynamic-gesture', { path: 'still', pose: 'steady' });
+    const query = { ...makeSyntheticSample({ path: 'still', pose: 'steady' }), motionType: 'static-hold' as const };
+    const result = classifySample(query, { gestures: [gesture('dynamic-gesture', '動態')], templates: [dynamic], calibrations: [], memoryRevision: 1 });
+    expect(result.status).toBe('unknown');
+    expect(result.reason).toMatch(/相容/);
   });
 });

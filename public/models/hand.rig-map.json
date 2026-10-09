@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "status": "rig-ready",
+  "assetPath": "/models/hands.glb",
+  "assetSha256": "83b785d2df6c24c56fd07d967642d2e965cfebcd347205a5331152c9f410c221",
+  "assetHands": "both",
+  "skinIndex": 0,
+  "skinJointCount": 46,
+  "rigVersion": "hands-glb-83b785d2-v1",
+  "retargetVersion": "mediapipe21-local-quaternion-v1",
+  "assetImportScale": 0.01,
+  "sceneScale": 7.5,
+  "hiddenHandPosition": [0, -8, 0],
+  "skeletonRoot": { "nodeIndex": 5, "name": "_rootJoint" },
+  "hands": {
+    "Left": {
+      "root": { "nodeIndex": 8, "name": "J_Left_02" },
+      "palm": { "nodeIndex": 9, "name": "J_Left_Hand_03" },
+      "thumb": { "landmarks": [1, 2, 3, 4], "drivenNodes": [10, 11, 12], "terminalNode": 13 },
+      "index": { "landmarks": [5, 6, 7, 8], "drivenNodes": [14, 15, 16], "terminalNode": 17 },
+      "middle": { "landmarks": [9, 10, 11, 12], "drivenNodes": [18, 19, 20], "terminalNode": 21 },
+      "ring": { "landmarks": [13, 14, 15, 16], "drivenNodes": [22, 23, 24], "terminalNode": 25 },
+      "pinky": { "landmarks": [17, 18, 19, 20], "drivenNodes": [26, 27, 28], "terminalNode": 29 }
+    },
+    "Right": {
+      "root": { "nodeIndex": 30, "name": "J_Right_023" },
+      "palm": { "nodeIndex": 31, "name": "J_Right_Hand_024" },
+      "thumb": { "landmarks": [1, 2, 3, 4], "drivenNodes": [32, 33, 34], "terminalNode": 35 },
+      "index": { "landmarks": [5, 6, 7, 8], "drivenNodes": [36, 37, 38], "terminalNode": 39 },
+      "middle": { "landmarks": [9, 10, 11, 12], "drivenNodes": [40, 41, 42], "terminalNode": 43 },
+      "ring": { "landmarks": [13, 14, 15, 16], "drivenNodes": [44, 45, 46], "terminalNode": 47 },
+      "pinky": { "landmarks": [17, 18, 19, 20], "drivenNodes": [48, 49, 50], "terminalNode": 51 }
+    }
+  },
+  "notes": [
+    "每指第四骨為 terminal；MediaPipe tip 沒有再下一段，因此不直接驅動 terminal rotation。",
+    "資產左右手共用同一 SkinnedMesh/Skeleton；執行時每個觀測手各自 clone 完整 skeleton，兩手不共用 Bone transform。",
+    "資產 Idle 動畫不作為使用者動作來源。"
+  ]
+}

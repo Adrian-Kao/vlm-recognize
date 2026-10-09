@@ -1,5 +1,6 @@
 import { distance2 } from '../math';
 import type { HandSide, RawHandObservation, TrackerDetection, Vec2 } from '../types';
+import { GAP_POLICY } from '../motion/gapPolicy';
 
 interface TrackState {
   id: string;
@@ -40,7 +41,7 @@ export class HandAssociator {
   update(detections: TrackerDetection[], timestampMs: number): RawHandObservation[] {
     const usable = detections.slice(0, 2);
     if (usable.length === 0) return [];
-    const liveTracks = this.tracks.filter((track) => timestampMs - track.lastTimestampMs <= 300);
+    const liveTracks = this.tracks.filter((track) => timestampMs - track.lastTimestampMs <= GAP_POLICY.trackingLostMs);
     const wrist = usable.map((detection): Vec2 => [detection.imageLandmarks[0][0], detection.imageLandmarks[0][1]]);
     const assignments: Array<[number, number]> = [];
     let ambiguous = false;

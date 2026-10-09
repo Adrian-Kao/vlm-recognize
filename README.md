@@ -8,7 +8,9 @@
 
 1. **新增動作**：明確要求攝影機權限，以 MediaPipe Hand Landmarker 逐幀擷取；3 秒倒數、0.5–8 秒錄製、品質檢查、非破壞式裁切、自訂名稱、同名追加多份示範。
 2. **辨識動作**：手動切段與停頓式自動切段；同時比較手形、掌部方向、影像平面手腕軌跡、雙手相對位置與時間順序；輸出 `recognized`、`unknown`、`ambiguous` 或 `invalid`。辨識片段只有經使用者確認才會追加。
-3. **名稱 → 3D 重現**：名稱／別名搜尋，取回實際保存的 clip；程序化有厚度手掌、五指與關節，同步雙手重播；支援 OrbitControls、正／側／背面、播放／暫停、進度、0.25–2×、循環、軌跡及除錯骨架。
+3. **名稱 → 3D 重現**：名稱／別名搜尋，取回實際保存的 clip；預設以 `public/models/hands.glb` 的真實 SkinnedMesh／左右手骨架重播，並保留程序化降級；支援 OrbitControls、正／側／背面、播放／暫停、進度、0.25–2×、循環、軌跡、原始估計骨架與固定骨長擬合檢視。
+
+新增與辨識可分別選擇「連續動態」或獨立的「靜態保持」。靜態保持需要 600ms 穩定觀測，缺口不計時，觸發後需釋放或明顯改變姿態才會重新武裝。
 
 資料保存於 IndexedDB（Dexie），可重新整理讀回、重新命名、選代表樣本、刪除、JSON 匯出與經 schema 驗證後匯入。攝影機 RGB 影像不會被保存或上傳。
 
@@ -19,6 +21,7 @@
 ```bash
 npm install
 npm run setup:assets
+npm run inspect:hand -- public/models/hands.glb
 npm run dev
 ```
 
@@ -30,6 +33,7 @@ npm run dev
 npm run typecheck
 npm run lint
 npm run test -- --run
+npm run inspect:hand -- public/models/hands.glb
 npx playwright install chromium   # 新環境只需一次
 npm run test:e2e
 npm run build
@@ -40,18 +44,21 @@ Playwright 啟動時會設定 `VITE_TEST_TRACKER=1`，頁面會以黃色橫幅�
 ## 資料與座標
 
 - `MotionSample.rawFrames` 保存未平滑、未補點的嚴格遞增時間戳，以及每幀完整的 21 點 image/world landmarks、左右手、track 與診斷資訊。
-- `RecognitionTemplate` 是可重建的 derived data，與原始重播資料分表；改名只更新 `GestureRecord` metadata。
+- `RecognitionTemplate` 是可重建的 derived data，與原始重播資料分表；v2 加入手指彎曲／形狀與衍生可靠性。升級時只從 rawFrames 重建模板並把舊校準標記 stale；改名只更新 `GestureRecord` metadata。
 - image x/y 先依影片寬高轉為像素，再以整段穩定掌部尺度正規化。`localPose` 保留局部 3D 手形及相機相對方向；`rootXY` 保留整隻手在影像平面的移動。
-- 3D 重播使用局部 world landmarks 加 image wrist XY。根節點 Z 固定為 0；MediaPipe world landmarks 的手中心原點不被宣稱為全域 3D 位置。
+- 3D 重播使用局部 world landmarks 加 image wrist XY。GLB 保留來源 rest pose 與固定骨長，只套用 root、掌部方向及每骨 local quaternion。根節點 Z 固定為 0；MediaPipe world landmarks 的手中心原點不被宣稱為全域 3D 位置。
 - 自拍鏡像只套用在預覽與 overlay，不改寫推論輸入、儲存值或辨識特徵。
 
 詳見 [架構說明](docs/architecture.md)、[決策與限制](docs/decisions.md) 與 [真人相機驗收](docs/manual-camera-test.md)。
+GLB 的實際結構、權重與授權 metadata 見 [資產報告](docs/HAND_ASSET_REPORT.md)，landmark-to-rig 對應見 [骨架映射](docs/HAND_RIG_MAPPING.md)。
 
 ## 已知限制
 
 - 目前未在本開發環境以真人攝影機驗證追蹤方向、裝置效能或辨識率；請依驗收文件實測。合成測試不能取代此步驟。
 - 單鏡頭無法量測可靠的全域深度；大幅前後推動只會保留局部手指深度，不會被誤稱為精密 motion capture。
 - 雙手交叉／遮蔽時 association 可能不確定，系統會拒絕該段。V1 假設同一人、一或兩手清楚入鏡。
+- 短缺口上限 150ms 是未校準工程起點；只在同 track、可靠前後端點間離線插值。150–250ms 重播只保持上一姿態並標示，辨識會拒絕；更長缺口視為追蹤中斷。
+- `hands.glb` 內嵌 metadata 宣告 CC-BY-4.0 與 PolyOne Studio 署名；公開發佈前仍應核對來源頁並保留署名。
 - `0.35` 最大距離與 `0.15` 類別差距是未校準起始值，不是機率或準確率。每類建議蒐集 3–5 份示範，再以未存入的正例與未知負例校準。
 - 模型與 WASM 在執行 `setup:assets` 後由本機伺服器提供；專案沒有宣稱未曾載入網站的瀏覽器能在完全斷網狀態啟動。
 

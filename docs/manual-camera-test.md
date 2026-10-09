@@ -4,7 +4,7 @@
 
 ## 環境紀錄
 
-記下日期、裝置、OS、瀏覽器版本、相機解析度、光線、MediaPipe delegate、模型 SHA-256、每類樣本數。使用 `npm run setup:assets && npm run dev`，只在 localhost 或 HTTPS 開啟。
+記下日期、裝置、OS、瀏覽器版本、相機解析度、光線、MediaPipe delegate、MediaPipe 模型 SHA-256、GLB SHA-256、每類樣本數。先執行 `npm run setup:assets` 與 `npm run inspect:hand -- public/models/hands.glb`，再用 `npm run dev` 於 localhost 或 HTTPS 開啟。
 
 ## 權限與生命週期
 
@@ -26,6 +26,10 @@
 - 檢查向左／向右 root trajectory、握拳／張開、雙手相對位置。
 - 檢查正面／側面／背面、自由旋轉、暫停、拖曳、0.25–2× 與循環。
 - 確認 1× 實際播放時間與裁切時長相符；大幅前後移動時接受 UI 所述的全域深度限制。
+- 在「GLB 手部／原始估計骨架／擬合骨架」間切換；同一 seek 時間的掌向、指向與 root 應一致。
+- 逐一測左手、右手、雙手；確認拇指在正確側、另一側不殘留、兩個播放器不互相改姿態。
+- 錄製張掌→握拳、握拳→張掌、單指彎曲與 pinch；從正／側／背面檢查每個指節確實改變，骨長不伸縮，資產 `Idle` 不會自行播放。
+- 暫時改名或破壞 GLB 複本測試載入錯誤時，畫面需明示「程序化降級」；辨識結果不可變成 Unknown。測完恢復原檔並重跑 inspect。
 
 ## M3/M4 辨識
 
@@ -37,6 +41,8 @@
 - 同動作快／慢版本。
 - 雙手分開到靠近／靠近到分開。
 - 未登錄動作、無手、日常調整姿勢、短暫遮蔽。
+- 另選 static-hold：已先握拳且手腕不動時保持至少 600ms，應只觸發一次；未放開不重複，短缺口不計保持時間。
+- 對握拳分別記錄 `no-hand`、`unstable-pose`、`segment-not-triggered`、`low-coverage` 或實際分類結果，不把所有失敗寫成分類錯誤。
 
 記錄正確類別、預測類別、Unknown／Ambiguous／Invalid、每類召回原始分子分母、未知誤接受數、無動作每分鐘誤觸發、end-hold 等待與總延遲。不要以模板自己比對自己的結果當準確率。
 

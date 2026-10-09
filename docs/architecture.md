@@ -14,15 +14,15 @@
 Dexie tables：`gestures`、`samples`、`templates`、`calibrations`、`settings`、`metadata`。
 
 - `samples` 是權威 raw motion，永遠保留原始時間戳與量測。
-- `templates` 是 `featureVersion=motion-features-v1`、`preprocessingVersion=preprocess-v1` 的可重建 cache。
+- `templates` 是 `featureVersion=motion-features-v2-shape-reliability`、`preprocessingVersion=preprocess-v2-gap-policy` 的可重建 cache。Dexie v2 migration 不改 rawFrames，只補動作類型、清除舊 derived templates 並將 calibration 標為 stale；repository 再以 transaction 重建。
 - `gestureId` 是穩定關聯鍵，名稱不作檔案或動畫索引。
 - 新增／刪除／匯入會增加 `memoryRevision`；少於三份樣本保持 `uncalibrated`，三份以上為 `provisional`，其他受影響的校準會標記 `stale`。
 - 多表修改使用單一 IndexedDB transaction；匯入全部驗證成功後才寫入。
 
 ## 辨識
 
-裁切後片段依實際時間戳重採樣為 64 個 phase。每手特徵為 63 維 wrist-relative local pose、2 維 root XY、6 維 palm axes；雙手另含 inter-hand XY。DTW 使用 Sakoe–Chiba band 與固定步進，在類別內取距離最小的真實樣本，再套用絕對距離與不同類別 margin 拒絕規則。
+裁切後片段依實際時間戳重採樣為 64 個 phase。每手保留 63 維 wrist-relative local pose、2 維 root XY、6 維 palm axes，新增關節彎曲、tip-to-MCP／掌心距離、捏合與張合形狀；雙手另含 inter-hand XY。可靠性由幾何、骨長合理性、track 身分與 evidence 類型衍生，不是 MediaPipe 逐點 confidence。DTW 以區塊權重乘兩側可靠性；共同有效及非 root 資訊不足時 cost 為不可比對，不以 epsilon 產生假零距離。
 
 ## 3D
 
-`MotionSample → buildPlaybackClip → samplePlaybackPose → ProceduralHand`。播放仍使用原始時間軸，不使用辨識的 64 格序列。每段指骨是有體積 capsule，關節為球體，掌部為依 palm axes 定向的有厚度 box。OrbitControls 只改 camera，不改 motion data。
+`MotionSample → buildPlaybackClip → samplePlaybackPose → canonical rig target → GLB local quaternions`。播放仍使用原始時間軸，不使用辨識的 64 格序列。GLB magic/hash 驗證通過後，每個觀測手各以 `SkeletonUtils.clone` 建立獨立 skeleton；建立 binding 時另以實際指骨旋轉驗證有權重頂點確實位移。每幀先回 rest transform，再驅動 root、palm 與 15 個骨段，忽略資產 Idle 動畫。程序化有體積手保留為明示 fallback／擬合檢視，raw skeleton 另行顯示。OrbitControls 只改 camera，不改 motion data。
